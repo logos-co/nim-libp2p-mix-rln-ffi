@@ -11,7 +11,9 @@ license     = "MIT OR Apache-2.0"
 # `nim-libp2p-mix#c387ca67cf477dc53ec6228027c45d8eda067917`; that pin
 # collapses the diamond dep for us — do NOT also require a different
 # libp2p / nim-libp2p-mix version here.
-requires "nim >= 2.2.4"
+# nim-ffi at the pinned SHA requires nim >= 2.2.6; nim-libp2p/cbind's
+# lockfile pins nim to 2.2.10.
+requires "nim >= 2.2.6"
 requires "chronos >= 4.2.2"
 requires "chronicles >= 0.11.0"
 requires "results >= 0.4.0"
@@ -27,7 +29,7 @@ requires "https://github.com/vacp2p/nim-cbor-serialization#1664160e04d153573373a
 
 # The RLN plugin drags libp2p 2.1.4 + libp2p_mix into scope; that's the
 # entire composition target for this facade.
-requires "https://github.com/logos-co/mix-rln-spam-protection-plugin.git#master"
+requires "https://github.com/logos-co/mix-rln-spam-protection-plugin.git#135182b72c16d3bd9c2d06087d84303272e4d1eb"
 
 # Build tasks --------------------------------------------------------------
 # Modelled on vacp2p/nim-libp2p `cbind/cbind.nimble`. Two products:

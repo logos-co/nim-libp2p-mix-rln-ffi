@@ -3,9 +3,10 @@
 
   inputs = {
     nixpkgs.url = "github:NixOS/nixpkgs/nixos-25.05";
+    zerokit.url = "github:vacp2p/zerokit";
   };
 
-  outputs = { self, nixpkgs }:
+  outputs = { self, nixpkgs, zerokit }:
     let
       systems = [
         "x86_64-linux" "aarch64-linux"
@@ -19,14 +20,11 @@
           pkgs = pkgsFor system;
         in {
           # `cbind`: the FFI artifact consumed by logos-libp2p-mix-rln's flake.
-          # Requires `librln` to be passed. `nix build .#cbind` will fail with
-          # a helpful message until librln packaging is wired.
+          # librln.a is sourced from vacp2p/zerokit's rln package.
           cbind = import ./nix/cbind.nix {
             inherit pkgs;
             src = ./.;
-            # TODO: derive librln from a vacp2p/zerokit input once packaged
-            # for nix. For now the default is null and the derivation throws.
-            librln = null;
+            librln = "${zerokit.packages.${system}.rln}/lib/librln.a";
           };
         }
       );
@@ -39,7 +37,11 @@
               pkgs.nim-2_2
               pkgs.nimble
               pkgs.git
+              zerokit.packages.${system}.rln
             ];
+            shellHook = ''
+              export LIBRLN_PATH=${zerokit.packages.${system}.rln}/lib/librln.a
+            '';
           };
         }
       );

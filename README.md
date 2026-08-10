@@ -8,47 +8,60 @@ C FFI facade composing [nim-libp2p][libp2p] + [nim-libp2p-mix][mix] +
 Analogous to `vacp2p/nim-libp2p`'s `cbind` package, and modelled on its
 build. Uses [nim-ffi][nim-ffi] for pragma-driven codegen of the C header.
 
-## Status: first pass — does not yet build end-to-end
+## Status: second pass
 
 What's real:
 - Package layout mirrors `nim-libp2p/cbind`.
-- `nim_libp2p_mix_rln.nimble` pins the correct upstream SHAs. The
-  historical libp2p diamond dep (mix pinning 2.0.0 / mix-rln pinning 2.1.4)
-  is resolved by transitively depending on `mix_rln_spam_protection`, whose
-  nimble already pins `nim-libp2p-mix` at SHA `c387ca67…` (which agrees on
-  `libp2p == 2.1.4`).
-- `libp2p_mix_rln.nim` has the full FFI API surface: `MixRlnConfig` +
-  request/response types + event types + procs for lifecycle, RLN membership,
-  mix send, SURB reply, mix-peer discovery, and cover-traffic knobs.
-- `libp2pMixRlnCreate` / `Start` / `Stop` / `Destroy` / `GetNodeInfo` (Version,
-  PeerId, Multiaddrs) have real bodies wired against `Switch`, `MixProtocol`,
-  and `MixRlnSpamProtection`.
+- Nimble file pins the correct upstream SHAs. The historical libp2p diamond
+  dep (mix pinning 2.0.0 / mix-rln pinning 2.1.4) is resolved transitively
+  via `mix_rln_spam_protection`, whose `.nimble` already pins `nim-libp2p-mix`
+  at SHA `c387ca67…` (which agrees on `libp2p == 2.1.4`).
+- Full FFI API surface in [`libp2p_mix_rln.nim`](libp2p_mix_rln.nim):
+  `MixRlnConfig` + request/response types + `{.ffiEvent.}` event types
+  (`onIncomingMixMessage`, `onRlnMembershipRegistered`,
+  `onRlnPublishRequested`) + 11 exported procs.
+- Real bodies wired against upstream APIs (verified against
+  `nim-libp2p-mix @ c387ca67`):
+    - `libp2pMixRlnCreate` — builds Switch + `MixProtocol.new(..., spamProtection = Opt.some(SpamProtection(plugin)), delayStrategy = Opt.some(SpamProtectionDelayStrategy(...)))`; mounts the mix protocol.
+    - `libp2pMixRlnStart` / `Stop` / `Destroy` — real switch lifecycle.
+    - `libp2pMixRlnSendMixMessage` — `MixProtocol.toConnection(...)` + `writeLp` + `close`; handles `expectReply` + SURB count.
+    - `libp2pMixRlnRegisterRlnMembership` / `HasRlnMembership` — `plugin.registerSelf` + `plugin.getMembershipIndex`; emits `onRlnMembershipRegistered`.
+    - `libp2pMixRlnGetNodeInfo(Version | PeerId | Multiaddrs)`.
+    - `libp2pMixRlnGetCoverTrafficRate` / `SetCoverTrafficRate` (rate is stored; scheduler propagation pending).
+- `buildRlnPlugin` bridges the plugin's `setPublishCallback` to the
+  `onRlnPublishRequested` FFI event so the C host can forward RLN Relay
+  coord traffic wherever it needs to go.
+- `nix/cbind-deps.nix` has real `sha256` values for all 26 transitive deps
+  (merged from `vacp2p/nim-libp2p @ v2.1.4/nix/deps.nix` + `master/nix/cbind-deps.nix`
+  + fresh `nix-prefetch-git` for libp2p / libp2p_mix / mix-rln plugin).
+  Regenerate with `tools/regen-cbind-deps.py`.
+- `flake.nix` inputs `github:vacp2p/zerokit` and passes
+  `${zerokit.packages.<system>.rln}/lib/librln.a` into `cbind.nix` — no
+  manual librln packaging needed. Verified out-of-band: `cargo build --release`
+  in `zerokit/rln/` produces a 42 MB `librln.a`, so the input path is real.
 
-What's stubbed (returns `err("not implemented")`):
-- `libp2pMixRlnSendMixMessage` / `SendMixSurbReply`
-- `libp2pMixRlnRegisterRlnMembership` / `HasRlnMembership`
-- `GetNodeInfo` fields `MixPublicKey`, `RlnMembershipIndex`
+What's still stubbed (returns `err("not implemented")`):
+- `libp2pMixRlnSendMixSurbReply` — needs the mix reply-store lookup wired.
+- `libp2pMixRlnGetNodeInfo(MixPublicKey | RlnMembershipIndex)` — need
+  accessors on `MixNodeInfo.mixPubKey` and the group-manager root/index.
+- `libp2pMixRlnListMixPeers` — waits on Logos Service Discovery wiring
+  (Extensible Peer Records source of truth per LIP LOGOS-MIXNET).
 
-What's left to make it build:
-1. **librln.a**. The RLN plugin links against `librln.a` from
-   [vacp2p/zerokit][zerokit] (a Rust project). `LIBRLN_PATH` must point at
-   that archive. Package it for nix so `flake.nix` can source it hermetically.
-2. **`nix/cbind-deps.nix`**. Only the three deps carried over verbatim from
-   `nim-libp2p/cbind` have real `sha256` values. The transitive closure
-   (libp2p 2.1.4, libp2p_mix at the pinned SHA, mix-rln, secp256k1, chronos,
-   chronicles, results, stew, nimcrypto, json_serialization, unittest2, …)
-   needs entries with hashes from `nix-prefetch-git`.
-3. **Verify the FFI compiles**. `nim-ffi`'s macro expansion has real
-   constraints on `{.ffi.}` type shapes; the current source hasn't been run
-   through the compiler yet. Any first-pass errors surface at
-   `nimble buildffi`.
-4. **Wire `MixRlnSpamProtection` into `MixProtocol.new(...)`**. Once the
-   pinned `nim-libp2p-mix` SHA's constructor signature is confirmed, replace
-   the plain `MixProtocol.new(nodeInfo, switch)` with the plugin-carrying
-   form.
-5. **Bridge `setPublishCallback` to a host-owned callback** so RLN
-   membership/metadata traffic can leave the process via a Logos-messaging
-   module registered from C.
+## Known blocker to `nimble buildffi`
+
+`nim-ffi` at the pinned SHA (`b95e2b04…`) requires **nim >= 2.2.6**;
+`nim-libp2p/cbind/nimble.lock` pins nim to `2.2.10`. If your local nim is
+older (this machine has 2.2.4), `nimble -l setup` fails with an
+unsatisfiable dep error. Two ways out:
+
+- **Nix path (recommended)**: `nix build .#cbind` uses `pkgs.nim-2_2`
+  which resolves to a current 2.2.x — bypasses local nim version.
+- **Local path**: install nim ≥ 2.2.6 (e.g. via `choosenim update stable`),
+  then `nimble -l setup && LIBRLN_PATH=… nimble buildffi`.
+
+The `{.ffi.}` type shapes in `libp2p_mix_rln.nim` have not yet been
+round-tripped through the `nim-ffi` macro — first compile may surface
+tweaks (e.g. macro rejection of `Opt[T]`-shaped fields).
 
 ## Layout
 
@@ -60,7 +73,9 @@ nim-libp2p-mix-rln/
 │   └── config.nim                # `{.ffi.}` config schema (mirrors metadata.json)
 ├── nix/
 │   ├── cbind.nix                 # hermetic build derivation
-│   └── cbind-deps.nix            # dep pins (some sha256s still PLACEHOLDER)
+│   └── cbind-deps.nix            # 26 pinned deps, real sha256s
+├── tools/
+│   └── regen-cbind-deps.py       # regenerate cbind-deps.nix after bumping pins
 ├── flake.nix                     # outputs packages.<system>.cbind
 ├── Makefile                      # thin wrapper: `make buildffi` / `make genbindings`
 ├── config.nims
