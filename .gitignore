@@ -1,0 +1,11 @@
+build/
+nimcache/
+nimcache_*/
+c_bindings/
+cddl_bindings/
+nimbledeps/
+nimble.paths
+librln.a
+result
+result-*
+.direnv/

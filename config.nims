@@ -1,0 +1,5 @@
+--styleCheck:usages
+--styleCheck:error
+--skipUserCfg
+--threads:on
+--mm:refc
