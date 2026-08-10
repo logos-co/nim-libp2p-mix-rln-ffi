@@ -47,21 +47,60 @@ What's still stubbed (returns `err("not implemented")`):
 - `libp2pMixRlnListMixPeers` — waits on Logos Service Discovery wiring
   (Extensible Peer Records source of truth per LIP LOGOS-MIXNET).
 
-## Known blocker to `nimble buildffi`
+## Known blockers to first build
 
-`nim-ffi` at the pinned SHA (`b95e2b04…`) requires **nim >= 2.2.6**;
-`nim-libp2p/cbind/nimble.lock` pins nim to `2.2.10`. If your local nim is
-older (this machine has 2.2.4), `nimble -l setup` fails with an
-unsatisfiable dep error. Two ways out:
+### 1. `nimble -l setup`
 
-- **Nix path (recommended)**: `nix build .#cbind` uses `pkgs.nim-2_2`
-  which resolves to a current 2.2.x — bypasses local nim version.
-- **Local path**: install nim ≥ 2.2.6 (e.g. via `choosenim update stable`),
-  then `nimble -l setup && LIBRLN_PATH=… nimble buildffi`.
+Ships with a working `nimble.lock` — cloned from `nim-libp2p/cbind/nimble.lock`,
+extended with `libp2p @ v2.1.4`, `libp2p_mix @ c387ca67`, `mix_rln_spam_protection @ 135182b7`,
+and `nim-ffi` repinned to `b6c17dc` (the master-reachable equivalent of `nim-libp2p/cbind`'s
+`b95e2b04…`, which lives on unmerged branch `fix/cbor-non-canonical` and can't be
+fetched by nimble's shallow-clone-of-master strategy). SAT resolution succeeds.
 
-The `{.ffi.}` type shapes in `libp2p_mix_rln.nim` have not yet been
-round-tripped through the `nim-ffi` macro — first compile may surface
-tweaks (e.g. macro rejection of `Opt[T]`-shaped fields).
+On this machine, `nimble -l setup` **installs 5 deps then fails building `testutils`**
+with `Error: system module needs: nimSubInt` — a `stdlib`-vs-`compiler` mismatch
+after nimble builds its own nim 2.2.10 from source into `nimbledeps/pkgs2/nim-2.2.10-…/`.
+Reproduces on nim 2.2.6.
+
+Almost certainly a nimble bug rather than something in this repo's config —
+`nim-libp2p/cbind` (source of the lockfile) presumably runs `nimble -l setup` in CI.
+If your machine hits the same, workarounds:
+
+- Delete the `nimbledeps/pkgs2/nim-*` dir after nimble installs it, and let subsequent
+  `nimble develop` calls use system nim.
+- Or `nimble install <url>` each dep individually with `--nolockfile` (bypasses the
+  lockfile-driven install path).
+
+### 2. `nix build .#cbind`
+
+The zerokit input's build hits `Failed to fetch file from https://crates.io/api/v1/crates/colorchoice/1.0.5/download. Status code: 403` during `zerokit-3.0.0-vendor-staging`. Cause: nixpkgs' `fetch-cargo-vendor-util`
+at the pin zerokit's flake uses (`23d72dabcb3b…`, "release-25.11") makes HTTP requests
+without a `User-Agent`, and crates.io returns 403 for empty-UA requests. Verified
+directly:
+
+```
+$ curl -so /dev/null -w '%{http_code}\n' https://crates.io/api/v1/crates/colorchoice/1.0.5/download
+403
+$ curl -so /dev/null -w '%{http_code}\n' -A 'any-ua' https://crates.io/api/v1/crates/colorchoice/1.0.5/download
+302
+```
+
+Not transient. Workarounds:
+
+- Add `nixpkgs` follows on the zerokit input pointing at a nixpkgs where the vendor
+  fetcher sets a User-Agent (post-2026-03 revisions of `nixpkgs-unstable`).
+- Or replace the `librln` input in `nix/cbind.nix` with a local-file derivation
+  bootstrapped by running `cargo build --release --lib` inside a zerokit checkout
+  and copying `target/release/librln.a` into `./vendor/`. (Trades reproducibility
+  for a working build.)
+- Or, upstream, patch zerokit's flake to override `fetch-cargo-vendor-util` with
+  the User-Agent-setting version.
+
+### 3. FFI macro round-trip (untested)
+
+The `{.ffi.}` type shapes in `libp2p_mix_rln.nim` have not yet been round-tripped
+through `nim-ffi`'s macro. Even once #1 or #2 is resolved, expect a first-pass round of
+macro-rejection fixes (e.g. re-shaping any fields nim-ffi can't marshal).
 
 ## Layout
 

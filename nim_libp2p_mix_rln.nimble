@@ -22,9 +22,11 @@ requires "metrics"
 requires "nimcrypto >= 0.6.0"
 requires "taskpools >= 0.1.0"
 
-# nim-ffi: pragmas + codegen for the C header. Pinned to the same SHA nim-libp2p/cbind
-# uses so both FFI libs stay compatible when linked into the same host process.
-requires "https://github.com/logos-messaging/nim-ffi#b95e2b04a63fbd417938bf3ec0ac14be7935e21b"
+# nim-ffi: pragmas + codegen for the C header. Pinned to current master head.
+# (nim-libp2p/cbind's pin `b95e2b04…` is on an unmerged branch
+# `fix/cbor-non-canonical` and nimble's shallow-clone-of-master strategy can't
+# resolve it; that fix is present on master as squashed commit `83f1aae`.)
+requires "https://github.com/logos-messaging/nim-ffi#b6c17dc822960b626d76d814de90208c0a40a44e"
 requires "https://github.com/vacp2p/nim-cbor-serialization#1664160e04d153573373afddc552b9cbf6fbe4dc"
 
 # The RLN plugin drags libp2p 2.1.4 + libp2p_mix into scope; that's the

@@ -1,0 +1,84 @@
+{
+  "nodes": {
+    "nixpkgs": {
+      "locked": {
+        "lastModified": 1767313136,
+        "narHash": "sha256-16KkgfdYqjaeRGBaYsNrhPRRENs0qzkQVUooNHtoy2w=",
+        "owner": "NixOS",
+        "repo": "nixpkgs",
+        "rev": "ac62194c3917d5f474c1a844b6fd6da2db95077d",
+        "type": "github"
+      },
+      "original": {
+        "owner": "NixOS",
+        "ref": "nixos-25.05",
+        "repo": "nixpkgs",
+        "type": "github"
+      }
+    },
+    "nixpkgs_2": {
+      "locked": {
+        "lastModified": 1770464364,
+        "narHash": "sha256-z5NJPSBwsLf/OfD8WTmh79tlSU8XgIbwmk6qB1/TFzY=",
+        "owner": "NixOS",
+        "repo": "nixpkgs",
+        "rev": "23d72dabcb3b12469f57b37170fcbc1789bd7457",
+        "type": "github"
+      },
+      "original": {
+        "owner": "NixOS",
+        "repo": "nixpkgs",
+        "rev": "23d72dabcb3b12469f57b37170fcbc1789bd7457",
+        "type": "github"
+      }
+    },
+    "root": {
+      "inputs": {
+        "nixpkgs": "nixpkgs",
+        "zerokit": "zerokit"
+      }
+    },
+    "rust-overlay": {
+      "inputs": {
+        "nixpkgs": [
+          "zerokit",
+          "nixpkgs"
+        ]
+      },
+      "locked": {
+        "lastModified": 1771297684,
+        "narHash": "sha256-wieWskQxZLPlNXX06JEB0bMoS/ZYQ89xBzF0RL9lyLs=",
+        "owner": "oxalica",
+        "repo": "rust-overlay",
+        "rev": "755d3669699a7c62aef35af187d75dc2728cfd85",
+        "type": "github"
+      },
+      "original": {
+        "owner": "oxalica",
+        "repo": "rust-overlay",
+        "type": "github"
+      }
+    },
+    "zerokit": {
+      "inputs": {
+        "nixpkgs": "nixpkgs_2",
+        "rust-overlay": "rust-overlay"
+      },
+      "locked": {
+        "lastModified": 1786340287,
+        "narHash": "sha256-s2BaNGvFApCaWNbqwqCXBnwE9yWVBeqq7Cvt90YNqJE=",
+        "owner": "vacp2p",
+        "repo": "zerokit",
+        "rev": "0e0a882f62f42d8e914a3769877d5daa7c5f3ac3",
+        "type": "github"
+      },
+      "original": {
+        "owner": "vacp2p",
+        "repo": "zerokit",
+        "type": "github"
+      }
+    }
+  },
+  "root": "root",
+  "version": 7
+}
