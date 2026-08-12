@@ -45,6 +45,16 @@
             src = ./.;
             librln = librlnOf system;
           };
+
+          # `test-mix-routing-rln`: same, but every mix node has an RLN
+          # SpamProtection plugin wired in and per-hop proofs are generated
+          # and verified along the whole Sphinx path. Uses an in-process
+          # publish bus to cross-sync memberships between plugins.
+          test-mix-routing-rln = import ./nix/test-mix-routing-rln.nix {
+            inherit pkgs;
+            src = ./.;
+            librln = librlnOf system;
+          };
         }
       );
 
