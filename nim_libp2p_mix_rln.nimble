@@ -104,3 +104,23 @@ task genbindings_c, "Generate C bindings (c_bindings/libp2p_mix_rln.h)":
 
 task genbindings_cddl, "Generate CDDL schema":
   genBindingsFor("cddl", "cddl_bindings")
+
+# `nimble test` — runs every tests/*.nim.
+# The mix-routing integration test (no RLN) doesn't need librln, but our .nimble
+# transitively drags mix-rln-spam-protection-plugin in, which links against
+# librln. Skip the RLN link if a test doesn't reach those symbols by only
+# passing --passL when LIBRLN_PATH is set.
+task test, "Run integration tests":
+  for f in listFiles("tests"):
+    let (_, name, ext) = f.splitFile
+    if ext != ".nim" or not name.startsWith("test_"):
+      continue
+    var linkArgs = ""
+    let librln = getEnv("LIBRLN_PATH", "")
+    if librln.len > 0:
+      linkArgs = " --passL:" & librln & " --passL:-lm"
+    exec "nim c -r --threads:on --mm:refc" &
+      " -d:libp2p_mix_experimental_exit_is_dest" &
+      linkArgs & ffiDepPaths() &
+      " --nimcache:nimcache_" & name & " tests/" & name & ".nim"
+    rmFile "tests/" & name.toExe
