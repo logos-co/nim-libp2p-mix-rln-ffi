@@ -28,7 +28,7 @@
       "original": {
         "owner": "NixOS",
         "repo": "nixpkgs",
-        "rev": "cd648d6ea62bc0ffba91e61fcfe5e33c1e2004b1",
+        "rev": "23d72dabcb3b12469f57b37170fcbc1789bd7457",
         "type": "github"
       }
     },
@@ -46,11 +46,11 @@
         ]
       },
       "locked": {
-        "lastModified": 1786507911,
-        "narHash": "sha256-w5aZRLbiu7H6TqsYXVMdRKg0S4DRaJpxyqxx86AwxVk=",
+        "lastModified": 1771297684,
+        "narHash": "sha256-wieWskQxZLPlNXX06JEB0bMoS/ZYQ89xBzF0RL9lyLs=",
         "owner": "oxalica",
         "repo": "rust-overlay",
-        "rev": "39db48099ad16834af7e27485a4babf9c28b3897",
+        "rev": "755d3669699a7c62aef35af187d75dc2728cfd85",
         "type": "github"
       },
       "original": {
@@ -65,11 +65,11 @@
         "rust-overlay": "rust-overlay"
       },
       "locked": {
-        "lastModified": 1786541857,
-        "narHash": "sha256-gLdja9piPUK1Jn5jGoD4dMFSL085hhSpuwLeCRz4GnQ=",
+        "lastModified": 1779168423,
+        "narHash": "sha256-OmCnpM+ZcI79EVozdKADj9h4sFsLwfCs5w7OK8Ir6fc=",
         "owner": "vacp2p",
         "repo": "zerokit",
-        "rev": "a7d24eaabfb395b47474fbd62edb416a5ef84e86",
+        "rev": "23106775a9bdbfc3c874ee8dc1904370ab0463f3",
         "type": "github"
       },
       "original": {

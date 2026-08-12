@@ -8,12 +8,33 @@ C FFI facade composing [nim-libp2p][libp2p] + [nim-libp2p-mix][mix] +
 Analogous to `vacp2p/nim-libp2p`'s `cbind` package, and modelled on its
 build. Uses [nim-ffi][nim-ffi] for pragma-driven codegen of the C header.
 
-## Status: end-to-end nix build working
+## Status: FFI validated end-to-end at runtime
 
-`nix build .#cbind` produces `liblibp2p_mix_rln.{so,a}` (34 MB shared, 31 MB
-static) plus a `libp2p_mix_rln.h` that compiles cleanly as C (round-tripped
-with `gcc -c`). Runtime behavior of individual FFI calls hasn't been exercised
-yet — that's the next iteration.
+`nix build .#cbind` produces `liblibp2p_mix_rln.{so,a}` plus `libp2p_mix_rln.h`.
+A minimal C smoke-test (NimMain → ctx_create → get_node_info → ctx_destroy)
+round-trips cleanly: libp2p Switch stands up, zerokit RLN instance created,
+MixRlnSpamProtection wires up with ephemeral credentials, we can query the
+node's PeerId (`16Uiu2H…`) and the destructor cleans up. The whole C API
+surface is validated.
+
+**Two temporary overrides required to build** until upstream fixes land in
+zerokit:
+
+```sh
+nix build .#cbind \
+  --override-input zerokit path:/path/to/zerokit-v2-fork \
+  --override-input zerokit/nixpkgs github:NixOS/nixpkgs?rev=cd648d6ea62bc0ffba91e61fcfe5e33c1e2004b1
+```
+
+The fork needs two zerokit changes (both tiny; PR pending):
+1. Add `rln-stateless = buildRln.override { features = "stateless"; }`
+   next to `rln` in `flake.nix` — mix-rln plugin's Nim binding calls the
+   zero-arg `ffi_rln_new`, which zerokit exposes only under the `stateless`
+   feature.
+2. In `nix/default.nix`'s `buildPhase`, add `--no-default-features` when
+   `features != null` — zerokit v2's `stateless` feature is broken with
+   the default `pmtree-ft` feature enabled (`public.rs:50` uses types that
+   only exist under `not(feature = "stateless")`).
 
 What's real:
 - Package layout mirrors `nim-libp2p/cbind`.

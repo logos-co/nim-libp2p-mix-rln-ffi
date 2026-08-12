@@ -14,17 +14,28 @@
       ];
       forAllSystems = nixpkgs.lib.genAttrs systems;
       pkgsFor = system: import nixpkgs { inherit system; };
+
+      # mix-rln-spam-protection-plugin's Nim binding declares
+      # `proc ffi_rln_new(): CResultRLNPtrVecU8` — the zero-arg form. Zerokit
+      # exposes that variant only under `--features=stateless`; the default
+      # build produces `ffi_rln_new(tree_depth, config_path)`. Same symbol,
+      # different arity → calling the default build with 0 args segfaults
+      # inside Rust. Consume the `rln-stateless` output rather than `rln`.
+      # (Our zerokit input must expose one — see the local zerokit-v2 fork's
+      # flake.nix, which adds `rln-stateless = buildRln.override { features =
+      # "stateless"; }` next to `rln`.)
+      librlnOf = system:
+        "${zerokit.packages.${system}.rln-stateless}/lib/librln.a";
     in {
       packages = forAllSystems (system:
         let
           pkgs = pkgsFor system;
         in {
           # `cbind`: the FFI artifact consumed by logos-libp2p-mix-rln's flake.
-          # librln.a is sourced from vacp2p/zerokit's rln package.
           cbind = import ./nix/cbind.nix {
             inherit pkgs;
             src = ./.;
-            librln = "${zerokit.packages.${system}.rln}/lib/librln.a";
+            librln = librlnOf system;
           };
         }
       );
@@ -37,10 +48,10 @@
               pkgs.nim-2_2
               pkgs.nimble
               pkgs.git
-              zerokit.packages.${system}.rln
+              zerokit.packages.${system}.rln-stateless
             ];
             shellHook = ''
-              export LIBRLN_PATH=${zerokit.packages.${system}.rln}/lib/librln.a
+              export LIBRLN_PATH=${librlnOf system}
             '';
           };
         }

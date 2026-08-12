@@ -244,11 +244,15 @@ proc buildRlnPlugin(
   ok(plugin)
 
 proc libp2pMixRlnCreate*(
-    lib: LibMixRln, cfg: MixRlnConfig
-): Future[Result[bool, string]] {.ffi.} =
+    cfg: MixRlnConfig
+): Future[Result[LibMixRln, string]] {.ffiCtor.} =
   ## Builds Switch, MixProtocol (wired with the RLN plugin as SpamProtection),
   ## and MixRlnSpamProtection. Mounts the mix protocol on the switch. Does NOT
   ## start the switch — call `libp2pMixRlnStart` for that.
+  ##
+  ## `{.ffiCtor.}` is nim-ffi's constructor pragma: no library receiver, returns
+  ## the freshly-built LibMixRln. Nim-ffi transfers ownership to the C side,
+  ## which releases it via the `{.ffiDtor.}` below.
   let rng = newRng()
 
   # A future revision will accept the mix node info from config; the current
@@ -279,15 +283,15 @@ proc libp2pMixRlnCreate*(
 
   switch.mount(proto)
 
-  lib.rng = rng
-  lib.switch = switch
-  lib.mixProto = proto
-  lib.rlnPlugin = plugin
-  lib.mixNodeInfo = nodeInfo
-  lib.coverRateFraction = cfg.mix.coverRateFraction
-  lib.running = false
-
-  ok(true)
+  ok(LibMixRln(
+    rng: rng,
+    switch: switch,
+    mixProto: proto,
+    rlnPlugin: plugin,
+    mixNodeInfo: nodeInfo,
+    coverRateFraction: cfg.mix.coverRateFraction,
+    running: false,
+  ))
 
 proc libp2pMixRlnDestroy*(lib: LibMixRln): Future[void] {.ffiDtor.} =
   ## Stops the switch (idempotent) and drops references. The FFI runtime
