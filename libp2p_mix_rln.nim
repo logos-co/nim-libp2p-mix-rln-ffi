@@ -61,12 +61,13 @@ include "libp2p_mix_rln/config"
 
 type NodeInfoField {.ffi.} = enum
   ## Field selector for `libp2pMixRlnGetNodeInfo`. Kept as a string enum so the
-  ## wire vocabulary is stable across languages.
-  Version = "version"
-  PeerId = "peer_id"
-  Multiaddrs = "multiaddrs"
-  MixPublicKey = "mix_public_key"
-  RlnMembershipIndex = "rln_membership_index"
+  ## wire vocabulary is stable across languages. Prefixed to avoid collisions
+  ## with libp2p types (`PeerId`) referenced elsewhere in this file.
+  NIF_Version = "version"
+  NIF_PeerId = "peer_id"
+  NIF_Multiaddrs = "multiaddrs"
+  NIF_MixPublicKey = "mix_public_key"
+  NIF_RlnMembershipIndex = "rln_membership_index"
 
 type NodeInfoRequest {.ffi.} = object
   field: NodeInfoField
@@ -176,7 +177,7 @@ proc decodeHexPrivKey(hex: string, rng: Rng): SkPrivateKey {.raises: [].} =
 # Constructor / destructor
 # ----------------------------------------------------------------------------
 
-proc buildSwitch(cfg: MixRlnConfig, rng: Rng): Switch {.raises: [].} =
+proc buildSwitch(cfg: MixRlnConfig, rng: Rng): Result[Switch, string] {.raises: [].} =
   ## Builds the libp2p Switch per LIP LOGOS-MIXNET: TCP + Noise + Mplex.
   ## QUIC support is left for the transport-selector follow-up.
   let skkey = decodeHexPrivKey(cfg.privKeyHex, rng)
@@ -184,16 +185,24 @@ proc buildSwitch(cfg: MixRlnConfig, rng: Rng): Switch {.raises: [].} =
   let listen =
     if cfg.addrs.len > 0: cfg.addrs[0]
     else: "/ip4/0.0.0.0/tcp/0"
-  let addr0 = MultiAddress.init(listen).tryGet()
-  SwitchBuilder
-    .new()
-    .withRng(rng)
-    .withPrivateKey(privKey)
-    .withAddress(addr0)
-    .withTcpTransport()
-    .withMplex()
-    .withNoise()
-    .build()
+  let addr0 = MultiAddress.init(listen).valueOr:
+    return err("invalid listen multiaddr '" & listen & "': " & $error)
+  try:
+    ok(
+      SwitchBuilder
+        .new()
+        .withRng(rng)
+        .withPrivateKey(privKey)
+        .withAddress(addr0)
+        .withTcpTransport()
+        .withMplex()
+        .withNoise()
+        .build()
+    )
+  except LPError as e:
+    err("SwitchBuilder.build failed: " & e.msg)
+  except CatchableError as e:
+    err("SwitchBuilder failed: " & e.msg)
 
 proc buildRlnPlugin(
     cfg: MixRlnConfig
@@ -250,7 +259,8 @@ proc libp2pMixRlnCreate*(
     else: 0
   let nodeInfo = MixNodeInfo.generateRandom(listenPort, rng)
 
-  let switch = buildSwitch(cfg, rng)
+  let switch = buildSwitch(cfg, rng).valueOr:
+    return err(error)
 
   let plugin = (await buildRlnPlugin(cfg)).valueOr:
     return err(error)
@@ -320,20 +330,20 @@ proc libp2pMixRlnGetNodeInfo*(
     lib: LibMixRln, req: NodeInfoRequest
 ): Future[Result[NodeInfoResponse, string]] {.ffi.} =
   case req.field
-  of Version:
+  of NIF_Version:
     ok(NodeInfoResponse(value: "0.1.0"))
-  of PeerId:
+  of NIF_PeerId:
     ok(NodeInfoResponse(value: $lib.switch.peerInfo.peerId))
-  of Multiaddrs:
+  of NIF_Multiaddrs:
     var parts: seq[string]
     for a in lib.switch.peerInfo.addrs:
       parts.add($a)
     ok(NodeInfoResponse(value: parts.join(",")))
-  of MixPublicKey:
+  of NIF_MixPublicKey:
     # MixNodeInfo.mixPubKey is a FieldElement (32-byte Curve25519). Wire it
     # as hex once the FieldElement → seq[byte] helper name is confirmed.
     err("not implemented — MixPublicKey accessor pending")
-  of RlnMembershipIndex:
+  of NIF_RlnMembershipIndex:
     err("not implemented — RlnMembershipIndex accessor pending")
 
 # ----------------------------------------------------------------------------

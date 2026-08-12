@@ -13,11 +13,41 @@
 ## from the flake so packaging zerokit stays out of scope here.
 
 let
-  cbindDeps = import ./cbind-deps.nix { inherit pkgs; };
+  rawCbindDeps = import ./cbind-deps.nix { inherit pkgs; };
 
+  # nim-nat-traversal ships C sources under `vendor/{miniupnp,libnatpmp-upstream}`
+  # and expects `nimble install` to run its `before install` hook, which compiles
+  # them into `libminiupnpc.a` / `libnatpmp.a` at hardcoded relative paths that
+  # nim-libp2p's `{.link.}` pragmas depend on. `fetchgit` skips that hook, so we
+  # wrap the source tree with a derivation that runs the makefiles.
+  natTraversalBuilt = pkgs.stdenv.mkDerivation {
+    name = "nim-nat-traversal-with-libs";
+    src = rawCbindDeps.nat_traversal;
+    nativeBuildInputs = [ pkgs.gnumake pkgs.gcc ];
+    dontConfigure = true;
+    buildPhase = ''
+      (cd vendor/miniupnp/miniupnpc && \
+        make CFLAGS="-Os -fPIC" build/libminiupnpc.a)
+      (cd vendor/libnatpmp-upstream && \
+        make CFLAGS="-Wall -Os -fPIC -DENABLE_STRNATPMPERR -DNATPMP_MAX_RETRIES=4" \
+          libnatpmp.a)
+    '';
+    installPhase = ''
+      mkdir -p $out
+      cp -r . $out
+    '';
+  };
+
+  cbindDeps = rawCbindDeps // { nat_traversal = natTraversalBuilt; };
+
+  # Some deps put nim sources at repo root (nim-libp2p), others under `src/`
+  # (mix-rln-spam-protection-plugin sets `srcDir = "src"` in its .nimble). We
+  # can't distinguish at eval time cheaply, so include both flavors — Nim's
+  # importer ignores paths that don't hold matches.
   cbindPathArgs =
     builtins.concatStringsSep " "
-      (map (p: "--path:${p}") (builtins.attrValues cbindDeps));
+      (map (p: "--path:${p} --path:${p}/src")
+           (builtins.attrValues cbindDeps));
 
   libExt =
     if pkgs.stdenv.hostPlatform.isWindows then "dll"

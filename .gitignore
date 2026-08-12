@@ -9,3 +9,8 @@ librln.a
 result
 result-*
 .direnv/
+
+# nimble leaves these at the repo root during resolution
+githubcom_*/
+tagged_versions.json
+

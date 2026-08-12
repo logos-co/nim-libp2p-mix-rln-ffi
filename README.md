@@ -8,7 +8,12 @@ C FFI facade composing [nim-libp2p][libp2p] + [nim-libp2p-mix][mix] +
 Analogous to `vacp2p/nim-libp2p`'s `cbind` package, and modelled on its
 build. Uses [nim-ffi][nim-ffi] for pragma-driven codegen of the C header.
 
-## Status: second pass
+## Status: end-to-end nix build working
+
+`nix build .#cbind` produces `liblibp2p_mix_rln.{so,a}` (34 MB shared, 31 MB
+static) plus a `libp2p_mix_rln.h` that compiles cleanly as C (round-tripped
+with `gcc -c`). Runtime behavior of individual FFI calls hasn't been exercised
+yet — that's the next iteration.
 
 What's real:
 - Package layout mirrors `nim-libp2p/cbind`.
@@ -47,60 +52,42 @@ What's still stubbed (returns `err("not implemented")`):
 - `libp2pMixRlnListMixPeers` — waits on Logos Service Discovery wiring
   (Extensible Peer Records source of truth per LIP LOGOS-MIXNET).
 
-## Known blockers to first build
+## Build
 
-### 1. `nimble -l setup`
+**Recommended:** hermetic nix build. Verified end-to-end.
 
-Ships with a working `nimble.lock` — cloned from `nim-libp2p/cbind/nimble.lock`,
-extended with `libp2p @ v2.1.4`, `libp2p_mix @ c387ca67`, `mix_rln_spam_protection @ 135182b7`,
-and `nim-ffi` repinned to `b6c17dc` (the master-reachable equivalent of `nim-libp2p/cbind`'s
-`b95e2b04…`, which lives on unmerged branch `fix/cbor-non-canonical` and can't be
-fetched by nimble's shallow-clone-of-master strategy). SAT resolution succeeds.
-
-On this machine, `nimble -l setup` **installs 5 deps then fails building `testutils`**
-with `Error: system module needs: nimSubInt` — a `stdlib`-vs-`compiler` mismatch
-after nimble builds its own nim 2.2.10 from source into `nimbledeps/pkgs2/nim-2.2.10-…/`.
-Reproduces on nim 2.2.6.
-
-Almost certainly a nimble bug rather than something in this repo's config —
-`nim-libp2p/cbind` (source of the lockfile) presumably runs `nimble -l setup` in CI.
-If your machine hits the same, workarounds:
-
-- Delete the `nimbledeps/pkgs2/nim-*` dir after nimble installs it, and let subsequent
-  `nimble develop` calls use system nim.
-- Or `nimble install <url>` each dep individually with `--nolockfile` (bypasses the
-  lockfile-driven install path).
-
-### 2. `nix build .#cbind`
-
-The zerokit input's build hits `Failed to fetch file from https://crates.io/api/v1/crates/colorchoice/1.0.5/download. Status code: 403` during `zerokit-3.0.0-vendor-staging`. Cause: nixpkgs' `fetch-cargo-vendor-util`
-at the pin zerokit's flake uses (`23d72dabcb3b…`, "release-25.11") makes HTTP requests
-without a `User-Agent`, and crates.io returns 403 for empty-UA requests. Verified
-directly:
-
-```
-$ curl -so /dev/null -w '%{http_code}\n' https://crates.io/api/v1/crates/colorchoice/1.0.5/download
-403
-$ curl -so /dev/null -w '%{http_code}\n' -A 'any-ua' https://crates.io/api/v1/crates/colorchoice/1.0.5/download
-302
+```sh
+$ nix build .#cbind
+$ ls result/lib/
+liblibp2p_mix_rln.a  liblibp2p_mix_rln.so
+$ ls result/include/
+libp2p_mix_rln.h  nim_ffi_cbor.h  nim_ffi_prelude.h  tinycbor/
 ```
 
-Not transient. Workarounds:
+Depends on:
+- `github:vacp2p/zerokit` as a flake input (supplies `librln.a`). Requires the
+  post-2026-08 zerokit that carries [PR #435](https://github.com/vacp2p/zerokit/pull/435)
+  — earlier revisions hit a crates.io 403 during their cargo-vendor step and a
+  stale `cargoHash` from v2.0.0.
+- Nim 2.2.10 (from `pkgs.nim-2_2`).
 
-- Add `nixpkgs` follows on the zerokit input pointing at a nixpkgs where the vendor
-  fetcher sets a User-Agent (post-2026-03 revisions of `nixpkgs-unstable`).
-- Or replace the `librln` input in `nix/cbind.nix` with a local-file derivation
-  bootstrapped by running `cargo build --release --lib` inside a zerokit checkout
-  and copying `target/release/librln.a` into `./vendor/`. (Trades reproducibility
-  for a working build.)
-- Or, upstream, patch zerokit's flake to override `fetch-cargo-vendor-util` with
-  the User-Agent-setting version.
+`nix/cbind.nix` also wraps `nim-nat-traversal` in a small builder derivation that
+compiles its vendored miniupnp / libnatpmp C sources into the `.a` files nim-libp2p
+links against — nix's `fetchgit` skips nat_traversal's `before install` hook, so this
+happens in-derivation instead.
 
-### 3. FFI macro round-trip (untested)
+**Local `nimble buildffi`** ships with a `nimble.lock` extended from
+`nim-libp2p/cbind/nimble.lock`, with `libp2p @ v2.1.4`, `libp2p_mix @ c387ca67`,
+`mix_rln_spam_protection @ 135182b7`, and `nim-ffi` repinned to `b6c17dc` (the
+master-reachable equivalent of `nim-libp2p/cbind`'s `b95e2b04…`, which lives on
+unmerged branch `fix/cbor-non-canonical` and can't be fetched by nimble's
+shallow-clone-of-master strategy).
 
-The `{.ffi.}` type shapes in `libp2p_mix_rln.nim` have not yet been round-tripped
-through `nim-ffi`'s macro. Even once #1 or #2 is resolved, expect a first-pass round of
-macro-rejection fixes (e.g. re-shaping any fields nim-ffi can't marshal).
+On this machine, `nimble -l setup` fails building `testutils` with a stdlib/compiler
+mismatch after nimble downloads and rebuilds its own copy of nim 2.2.10 from source
+— likely a nimble bug. If you hit it: delete the `nimbledeps/pkgs2/nim-*` dir
+after nimble installs it, and let subsequent `nimble develop` calls use system nim.
+Or just use the nix path.
 
 ## Layout
 

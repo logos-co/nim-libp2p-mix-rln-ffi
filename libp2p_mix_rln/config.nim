@@ -15,41 +15,41 @@
 type MixConfig* {.ffi.} = object
   ## X25519 keypair advertised for Sphinx path selection is embedded here.
   ## `mixPrivKeyHex = ""` → generate on create.
-  mixPrivKeyHex*: string
-  coverRateFraction*: float64  ## LIP LOGOS-MIXNET default: 0.7.
+  mixPrivKeyHex: string
+  coverRateFraction: float64  ## LIP LOGOS-MIXNET default: 0.7.
 
 type RlnConfig* {.ffi.} = object
-  keystorePath*: string
-  keystorePassword*: string
-  treePath*: string
-  rlnResourcesPath*: string
-  rlnIdentifierHex*: string    ## Hex-encoded RLN identifier.
-  epochDurationSeconds*: int64 ## TBD; placeholder default 1.
-  period*: int64               ## TBD; placeholder default 1.
-  messagingRate*: int64        ## TBD; placeholder default 10.
-  maxEpochGap*: int            ## TBD; placeholder default 20.
-  userMessageLimit*: int       ## TBD; placeholder default 100.
-  acceptableRootWindowSize*: int   ## LIP LOGOS-MIXNET: 5.
-  stakedFund*: string          ## TBD.
-  membershipContentTopic*: string  ## Placeholder "/mix/rln/membership/v1".
-  proofMetadataContentTopic*: string  ## Placeholder "/mix/rln/metadata/v1".
-  coordCluster*: int64         ## TBD; placeholder 0.
+  keystorePath: string
+  keystorePassword: string
+  treePath: string
+  rlnResourcesPath: string
+  rlnIdentifierHex: string    ## Hex-encoded RLN identifier.
+  epochDurationSeconds: int64 ## TBD; placeholder default 1.
+  period: int64               ## TBD; placeholder default 1.
+  messagingRate: int64        ## TBD; placeholder default 10.
+  maxEpochGap: int            ## TBD; placeholder default 20.
+  userMessageLimit: int       ## TBD; placeholder default 100.
+  acceptableRootWindowSize: int   ## LIP LOGOS-MIXNET: 5.
+  stakedFund: string          ## TBD.
+  membershipContentTopic: string  ## Placeholder "/mix/rln/membership/v1".
+  proofMetadataContentTopic: string  ## Placeholder "/mix/rln/metadata/v1".
+  coordCluster: int64         ## TBD; placeholder 0.
 
 type DiscoveryConfig* {.ffi.} = object
-  mountServiceDiscovery*: bool
-  serviceId*: string           ## Placeholder "logos.mixnet".
+  mountServiceDiscovery: bool
+  serviceId: string           ## Placeholder "logos.mixnet".
 
 type MixRlnConfig* {.ffi.} = object
   ## Top-level config passed to `libp2pMixRlnCreate`.
-  addrs*: seq[string]          ## libp2p listen multiaddrs.
-  bootstrapPeerIds*: seq[string]
-  bootstrapMultiaddrs*: seq[seq[string]]  ## Parallel to `bootstrapPeerIds`.
-  privKeyHex*: string          ## Hex-encoded libp2p host private key ("" → fresh).
-  transport*: string           ## "tcp" (only TCP wired in first pass; "quic" pending).
-  maxConnections*: int
-  maxInConnections*: int
-  maxOutConnections*: int
-  maxConnsPerPeer*: int
-  mix*: MixConfig
-  rln*: RlnConfig
-  discovery*: DiscoveryConfig
+  addrs: seq[string]          ## libp2p listen multiaddrs.
+  bootstrapPeerIds: seq[string]
+  bootstrapMultiaddrs: seq[seq[string]]  ## Parallel to `bootstrapPeerIds`.
+  privKeyHex: string          ## Hex-encoded libp2p host private key ("" → fresh).
+  transport: string           ## "tcp" (only TCP wired in first pass; "quic" pending).
+  maxConnections: int
+  maxInConnections: int
+  maxOutConnections: int
+  maxConnsPerPeer: int
+  mix: MixConfig
+  rln: RlnConfig
+  discovery: DiscoveryConfig
