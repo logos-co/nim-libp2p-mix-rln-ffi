@@ -3,10 +3,22 @@
 
   inputs = {
     nixpkgs.url = "github:NixOS/nixpkgs/nixos-25.05";
-    zerokit.url = "github:vacp2p/zerokit";
+
+    # Pins the richard-ramos fork branch that carries zerokit PR #436
+    # (draft against `release-v2.0.1`; adds the `rln-stateless` output and
+    # `--no-default-features` handling that this facade needs). Point back
+    # at `github:vacp2p/zerokit` once the changes land upstream. Override
+    # with `--override-input zerokit ...` if you want to try a different
+    # revision locally.
+    zerokit.url = "github:richard-ramos/zerokit/nix-rln-stateless";
+
+    # Nixpkgs pin that carries the fetch-cargo-vendor-util fix (zerokit PR
+    # #435) needed to vendor without hitting crates.io 403.
+    zerokit-nixpkgs.url = "github:NixOS/nixpkgs?rev=cd648d6ea62bc0ffba91e61fcfe5e33c1e2004b1";
+    zerokit.inputs.nixpkgs.follows = "zerokit-nixpkgs";
   };
 
-  outputs = { self, nixpkgs, zerokit }:
+  outputs = { self, nixpkgs, zerokit, ... }:
     let
       systems = [
         "x86_64-linux" "aarch64-linux"

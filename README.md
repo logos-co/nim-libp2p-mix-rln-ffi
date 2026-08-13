@@ -29,19 +29,10 @@ nix build .#cbind
 # → result/include/libp2p_mix_rln.h + tinycbor/
 ```
 
-**Two temporary overrides are required** until [zerokit PR #436][zerokit-pr]
-lands (draft; not for merge — see the PR for why):
-
-```sh
-nix build .#cbind \
-  --override-input zerokit path:/path/to/zerokit-v2-fork \
-  --override-input zerokit/nixpkgs 'github:NixOS/nixpkgs?rev=cd648d6ea62bc0ffba91e61fcfe5e33c1e2004b1'
-```
-
-The zerokit v2 fork just needs the two nix packaging changes in the PR:
-add the `rln-stateless` output, and pass `--no-default-features` when
-`features` is set. The `nixpkgs` pin gives you a `fetch-cargo-vendor-util`
-that sets a User-Agent so crates.io doesn't 403.
+`flake.nix` pins `zerokit` at the [`richard-ramos/zerokit#nix-rln-stateless`][fork-branch]
+branch (source of [zerokit PR #436][zerokit-pr] — draft against v2.x, not
+for merge; see the PR for why) so no override is needed. Repoint to
+`vacp2p/zerokit` once those nix packaging changes land upstream.
 
 ## Tests
 
@@ -50,8 +41,6 @@ nix run .#test-mix-routing         # 5-node Sphinx circuit (no RLN)
 nix run .#test-mix-routing-rln     # same, with per-hop RLN
 nix run .#smoketest-3node-ffi      # C-level 3-node ping through FFI
 ```
-
-All three use the same overrides as `.#cbind`.
 
 ## What's real vs. stubbed
 
@@ -121,3 +110,4 @@ system nim. The nix path avoids this entirely.
 [nim-ffi]: https://github.com/logos-messaging/nim-ffi
 [zerokit]: https://github.com/vacp2p/zerokit
 [zerokit-pr]: https://github.com/vacp2p/zerokit/pull/436
+[fork-branch]: https://github.com/richard-ramos/zerokit/tree/nix-rln-stateless
