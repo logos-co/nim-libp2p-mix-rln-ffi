@@ -43,7 +43,7 @@ let
       "--passL:${librln} --passL:-lm --passL:-lstdc++";
 in
 pkgs.stdenv.mkDerivation {
-  pname = "nim-libp2p-mix-rln-test-mix-routing";
+  pname = "nim-libp2p-mix-rln-ffi-test-mix-routing";
   version = "dev";
 
   inherit src;

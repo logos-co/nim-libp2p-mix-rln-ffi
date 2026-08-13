@@ -29,7 +29,7 @@ let
            (builtins.attrValues cbindDeps));
 in
 pkgs.stdenv.mkDerivation {
-  pname = "nim-libp2p-mix-rln-test-mix-routing-rln";
+  pname = "nim-libp2p-mix-rln-ffi-test-mix-routing-rln";
   version = "dev";
 
   inherit src;

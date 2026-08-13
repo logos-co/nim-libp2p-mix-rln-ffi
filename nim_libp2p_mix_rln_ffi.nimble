@@ -1,6 +1,6 @@
 mode = ScriptMode.Verbose
 
-packageName = "nim_libp2p_mix_rln"
+packageName = "nim_libp2p_mix_rln_ffi"
 version     = "0.1.0"
 author      = "Logos"
 description = "C FFI facade composing nim-libp2p, nim-libp2p-mix, and mix-rln-spam-protection-plugin. Produces liblibp2p_mix_rln.{so,dylib,dll} + libp2p_mix_rln.h for consumption by logos-libp2p-mix-rln."

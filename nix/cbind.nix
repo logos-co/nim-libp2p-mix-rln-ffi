@@ -3,7 +3,7 @@
 ## Hermetic build of the FFI shared library + generated C header.
 ##
 ## Mirrors vacp2p/nim-libp2p `nix/cbind.nix` but tailored to
-## nim_libp2p_mix_rln.nimble's dep set and a mandatory `librln.a` input.
+## nim_libp2p_mix_rln_ffi.nimble's dep set and a mandatory `librln.a` input.
 ##
 ## Deps are declared by `cbind-deps.nix`. That file is a stub in this scaffold
 ## — its `sha256` values are placeholders. Regenerate them with `nix-prefetch-git`
@@ -58,12 +58,12 @@ let
 
   librlnLinkArgs =
     if librln == null then
-      throw "nim-libp2p-mix-rln/nix/cbind.nix: librln input is required (path to librln.a)"
+      throw "nim-libp2p-mix-rln-ffi/nix/cbind.nix: librln input is required (path to librln.a)"
     else
       "--passL:${librln} --passL:-lm";
 in
 pkgs.stdenv.mkDerivation {
-  pname = "nim-libp2p-mix-rln-cbind";
+  pname = "nim-libp2p-mix-rln-ffi-cbind";
   version = "dev";
 
   inherit src;

@@ -1,150 +1,25 @@
-# nim-libp2p-mix-rln
+# nim-libp2p-mix-rln-ffi
 
 C FFI facade composing [nim-libp2p][libp2p] + [nim-libp2p-mix][mix] +
-[mix-rln-spam-protection-plugin][mix-rln]. Produces
-`liblibp2p_mix_rln.{so,dylib,dll}` and `libp2p_mix_rln.h` for consumption by
-[logos-libp2p-mix-rln][logos-mod]'s C++/Qt module.
+[mix-rln-spam-protection-plugin][mix-rln] (aka `nim-libp2p-mix-rln`, the
+RLN spam-protection Nim library). Produces `liblibp2p_mix_rln.{so,dylib,dll}`
+and `libp2p_mix_rln.h` for consumption by [logos-libp2p-mix-rln][logos-mod]'s
+C++/Qt Logos Core module.
 
-Analogous to `vacp2p/nim-libp2p`'s `cbind` package, and modelled on its
-build. Uses [nim-ffi][nim-ffi] for pragma-driven codegen of the C header.
+Modelled on `vacp2p/nim-libp2p`'s `cbind` package. Uses [nim-ffi][nim-ffi]
+for pragma-driven codegen of the C header.
 
-## Status: FFI validated end-to-end at runtime
+## Status
 
-`nix build .#cbind` produces `liblibp2p_mix_rln.{so,a}` plus `libp2p_mix_rln.h`.
-A minimal C smoke-test (NimMain → ctx_create → get_node_info → ctx_destroy)
-round-trips cleanly: libp2p Switch stands up, zerokit RLN instance created,
-MixRlnSpamProtection wires up with ephemeral credentials, we can query the
-node's PeerId (`16Uiu2H…`) and the destructor cleans up. The whole C API
-surface is validated.
+FFI validated end-to-end at runtime:
 
-**Two temporary overrides required to build** until upstream fixes land in
-zerokit:
-
-```sh
-nix build .#cbind \
-  --override-input zerokit path:/path/to/zerokit-v2-fork \
-  --override-input zerokit/nixpkgs github:NixOS/nixpkgs?rev=cd648d6ea62bc0ffba91e61fcfe5e33c1e2004b1
-```
-
-The fork needs two zerokit changes (both tiny; PR pending):
-1. Add `rln-stateless = buildRln.override { features = "stateless"; }`
-   next to `rln` in `flake.nix` — mix-rln plugin's Nim binding calls the
-   zero-arg `ffi_rln_new`, which zerokit exposes only under the `stateless`
-   feature.
-2. In `nix/default.nix`'s `buildPhase`, add `--no-default-features` when
-   `features != null` — zerokit v2's `stateless` feature is broken with
-   the default `pmtree-ft` feature enabled (`public.rs:50` uses types that
-   only exist under `not(feature = "stateless")`).
-
-What's real:
-- Package layout mirrors `nim-libp2p/cbind`.
-- Nimble file pins the correct upstream SHAs. The historical libp2p diamond
-  dep (mix pinning 2.0.0 / mix-rln pinning 2.1.4) is resolved transitively
-  via `mix_rln_spam_protection`, whose `.nimble` already pins `nim-libp2p-mix`
-  at SHA `c387ca67…` (which agrees on `libp2p == 2.1.4`).
-- Full FFI API surface in [`libp2p_mix_rln.nim`](libp2p_mix_rln.nim):
-  `MixRlnConfig` + request/response types + `{.ffiEvent.}` event types
-  (`onIncomingMixMessage`, `onRlnMembershipRegistered`,
-  `onRlnPublishRequested`) + 11 exported procs.
-- Real bodies wired against upstream APIs (verified against
-  `nim-libp2p-mix @ c387ca67`):
-    - `libp2pMixRlnCreate` — builds Switch + `MixProtocol.new(..., spamProtection = Opt.some(SpamProtection(plugin)), delayStrategy = Opt.some(SpamProtectionDelayStrategy(...)))`; mounts the mix protocol.
-    - `libp2pMixRlnStart` / `Stop` / `Destroy` — real switch lifecycle.
-    - `libp2pMixRlnSendMixMessage` — `MixProtocol.toConnection(...)` + `writeLp` + `close`; handles `expectReply` + SURB count.
-    - `libp2pMixRlnRegisterRlnMembership` / `HasRlnMembership` — `plugin.registerSelf` + `plugin.getMembershipIndex`; emits `onRlnMembershipRegistered`.
-    - `libp2pMixRlnGetNodeInfo(Version | PeerId | Multiaddrs)`.
-    - `libp2pMixRlnGetCoverTrafficRate` / `SetCoverTrafficRate` (rate is stored; scheduler propagation pending).
-- `buildRlnPlugin` bridges the plugin's `setPublishCallback` to the
-  `onRlnPublishRequested` FFI event so the C host can forward RLN Relay
-  coord traffic wherever it needs to go.
-- `nix/cbind-deps.nix` has real `sha256` values for all 26 transitive deps
-  (merged from `vacp2p/nim-libp2p @ v2.1.4/nix/deps.nix` + `master/nix/cbind-deps.nix`
-  + fresh `nix-prefetch-git` for libp2p / libp2p_mix / mix-rln plugin).
-  Regenerate with `tools/regen-cbind-deps.py`.
-- `flake.nix` inputs `github:vacp2p/zerokit` and passes
-  `${zerokit.packages.<system>.rln}/lib/librln.a` into `cbind.nix` — no
-  manual librln packaging needed. Verified out-of-band: `cargo build --release`
-  in `zerokit/rln/` produces a 42 MB `librln.a`, so the input path is real.
-
-What's still stubbed (returns `err("not implemented")`):
-- `libp2pMixRlnSendMixSurbReply` — needs the mix reply-store lookup wired.
-- `libp2pMixRlnGetNodeInfo(MixPublicKey | RlnMembershipIndex)` — need
-  accessors on `MixNodeInfo.mixPubKey` and the group-manager root/index.
-- `libp2pMixRlnListMixPeers` — waits on Logos Service Discovery wiring
-  (Extensible Peer Records source of truth per LIP LOGOS-MIXNET).
-
-## Build
-
-**Recommended:** hermetic nix build. Verified end-to-end.
-
-```sh
-$ nix build .#cbind
-$ ls result/lib/
-liblibp2p_mix_rln.a  liblibp2p_mix_rln.so
-$ ls result/include/
-libp2p_mix_rln.h  nim_ffi_cbor.h  nim_ffi_prelude.h  tinycbor/
-```
-
-Depends on:
-- `github:vacp2p/zerokit` as a flake input (supplies `librln.a`). Requires the
-  post-2026-08 zerokit that carries [PR #435](https://github.com/vacp2p/zerokit/pull/435)
-  — earlier revisions hit a crates.io 403 during their cargo-vendor step and a
-  stale `cargoHash` from v2.0.0.
-- Nim 2.2.10 (from `pkgs.nim-2_2`).
-
-`nix/cbind.nix` also wraps `nim-nat-traversal` in a small builder derivation that
-compiles its vendored miniupnp / libnatpmp C sources into the `.a` files nim-libp2p
-links against — nix's `fetchgit` skips nat_traversal's `before install` hook, so this
-happens in-derivation instead.
-
-**Local `nimble buildffi`** ships with a `nimble.lock` extended from
-`nim-libp2p/cbind/nimble.lock`, with `libp2p @ v2.1.4`, `libp2p_mix @ c387ca67`,
-`mix_rln_spam_protection @ 135182b7`, and `nim-ffi` repinned to `b6c17dc` (the
-master-reachable equivalent of `nim-libp2p/cbind`'s `b95e2b04…`, which lives on
-unmerged branch `fix/cbor-non-canonical` and can't be fetched by nimble's
-shallow-clone-of-master strategy).
-
-On this machine, `nimble -l setup` fails building `testutils` with a stdlib/compiler
-mismatch after nimble downloads and rebuilds its own copy of nim 2.2.10 from source
-— likely a nimble bug. If you hit it: delete the `nimbledeps/pkgs2/nim-*` dir
-after nimble installs it, and let subsequent `nimble develop` calls use system nim.
-Or just use the nix path.
-
-## Layout
-
-```
-nim-libp2p-mix-rln/
-├── nim_libp2p_mix_rln.nimble     # package + `buildffi` + `genbindings_c`
-├── libp2p_mix_rln.nim            # FFI entry — declareLibrary(), types, procs, genBindings()
-├── libp2p_mix_rln/
-│   └── config.nim                # `{.ffi.}` config schema (mirrors metadata.json)
-├── nix/
-│   ├── cbind.nix                 # hermetic build derivation
-│   └── cbind-deps.nix            # 26 pinned deps, real sha256s
-├── tools/
-│   └── regen-cbind-deps.py       # regenerate cbind-deps.nix after bumping pins
-├── flake.nix                     # outputs packages.<system>.cbind
-├── Makefile                      # thin wrapper: `make buildffi` / `make genbindings`
-├── config.nims
-├── LICENSE-MIT
-├── LICENSE-APACHEv2
-└── README.md
-```
-
-## Build (local)
-
-```sh
-# 1. Build librln.a from vacp2p/zerokit (out of scope here).
-export LIBRLN_PATH=/path/to/librln.a
-
-# 2. Install nim deps into ./nimbledeps
-nimble -l setup -y
-
-# 3. Build the shared library and header.
-make buildffi genbindings
-# → build/liblibp2p_mix_rln.so
-# → c_bindings/libp2p_mix_rln.h
-```
+- Standalone C smoke test: `nim-libp2p-mix-rln-ffi-smoketest-3node-ffi`
+  drives 3 nodes purely through the C API, pings across a Sphinx circuit,
+  round-trips per-hop RLN proofs.
+- Nim integration test: `test_mix_routing_rln` — same but composed
+  in-process, useful for iterating on the composition.
+- Multi-node e2e through the C++ Logos Core module — see
+  [logos-libp2p-mix-rln][logos-mod].
 
 ## Build (nix, hermetic)
 
@@ -154,8 +29,90 @@ nix build .#cbind
 # → result/include/libp2p_mix_rln.h + tinycbor/
 ```
 
-This is what [logos-libp2p-mix-rln][logos-mod]'s flake consumes as its
-`libp2p_mix_rln` external library input.
+**Two temporary overrides are required** until [zerokit PR #436][zerokit-pr]
+lands (draft; not for merge — see the PR for why):
+
+```sh
+nix build .#cbind \
+  --override-input zerokit path:/path/to/zerokit-v2-fork \
+  --override-input zerokit/nixpkgs 'github:NixOS/nixpkgs?rev=cd648d6ea62bc0ffba91e61fcfe5e33c1e2004b1'
+```
+
+The zerokit v2 fork just needs the two nix packaging changes in the PR:
+add the `rln-stateless` output, and pass `--no-default-features` when
+`features` is set. The `nixpkgs` pin gives you a `fetch-cargo-vendor-util`
+that sets a User-Agent so crates.io doesn't 403.
+
+## Tests
+
+```sh
+nix run .#test-mix-routing         # 5-node Sphinx circuit (no RLN)
+nix run .#test-mix-routing-rln     # same, with per-hop RLN
+nix run .#smoketest-3node-ffi      # C-level 3-node ping through FFI
+```
+
+All three use the same overrides as `.#cbind`.
+
+## What's real vs. stubbed
+
+Real, exercised at runtime:
+- Full lifecycle (`create` / `start` / `stop` / `destroy`).
+- `sendMixMessage` — Sphinx-routed writeLp, optional SURB reply.
+- `sendMixMessageToExit` — exit-is-dest routing, no exit multiaddr needed.
+- `registerRlnMembership` / `hasRlnMembership`.
+- `getNodeInfo(Version | PeerId | Multiaddrs | MixPublicKey)`.
+- Multi-node topology: `getLocalMixPeerRecord`, `addMixPeer`,
+  `mountReceiver`, `deliverCoordFrame` for shell-driven RLN coord sync.
+- Events (via `nim-ffi`'s `{.ffiEvent.}`): `onIncomingMixMessage`,
+  `onRlnMembershipRegistered`, `onRlnPublishRequested`.
+
+Stubbed (returns `err("not implemented")`):
+- `libp2pMixRlnSendMixSurbReply` — needs the mix reply-store lookup wired.
+- `libp2pMixRlnGetNodeInfo(RlnMembershipIndex)` — needs group-manager
+  root/index accessor upstream.
+- `libp2pMixRlnListMixPeers` — waits on Logos Service Discovery wiring
+  (Extensible Peer Records source of truth per LIP LOGOS-MIXNET).
+
+## Layout
+
+```
+nim-libp2p-mix-rln-ffi/
+├── nim_libp2p_mix_rln_ffi.nimble  # package + buildffi + genbindings_c
+├── libp2p_mix_rln.nim             # FFI entry — declareLibrary(), types, procs
+├── libp2p_mix_rln/config.nim      # {.ffi.} config schema
+├── nix/
+│   ├── cbind.nix                  # hermetic build derivation
+│   ├── cbind-deps.nix             # 26 pinned deps, real sha256s
+│   ├── smoketest-3node-ffi.nix    # C smoke test derivation
+│   ├── test-mix-routing.nix       # 5-node Sphinx test (no RLN)
+│   └── test-mix-routing-rln.nix   # 5-node Sphinx test with RLN
+├── tools/regen-cbind-deps.py      # regenerate cbind-deps.nix after bumping pins
+├── flake.nix                      # outputs packages.<system>.{cbind,tests}
+├── tests/                         # Nim + C integration tests
+├── Makefile
+├── UPSTREAM_ISSUES.md             # blockers/gaps found upstream during integration
+├── config.nims
+├── LICENSE-MIT
+└── LICENSE-APACHEv2
+```
+
+## Local (non-nix) build
+
+```sh
+export LIBRLN_PATH=/path/to/librln.a          # from vacp2p/zerokit
+nimble -l setup -y
+nim c -d:libp2p_mix_experimental_exit_is_dest \
+      --app:lib --threads:on --mm:refc \
+      --passL:$LIBRLN_PATH --passL:-lm \
+      -o:build/liblibp2p_mix_rln.so \
+      libp2p_mix_rln.nim
+```
+
+On this machine, `nimble -l setup` currently fails building `testutils`
+against nimble's freshly-downloaded copy of nim 2.2.10 (stdlib/compiler
+mismatch — likely a nimble bug). If you hit it, delete
+`nimbledeps/pkgs2/nim-*` and let subsequent `nimble develop` calls use the
+system nim. The nix path avoids this entirely.
 
 [libp2p]: https://github.com/vacp2p/nim-libp2p
 [mix]: https://github.com/logos-co/nim-libp2p-mix
@@ -163,3 +120,4 @@ This is what [logos-libp2p-mix-rln][logos-mod]'s flake consumes as its
 [logos-mod]: https://github.com/logos-co/logos-libp2p-mix-rln
 [nim-ffi]: https://github.com/logos-messaging/nim-ffi
 [zerokit]: https://github.com/vacp2p/zerokit
+[zerokit-pr]: https://github.com/vacp2p/zerokit/pull/436
