@@ -30,12 +30,22 @@
       packages = forAllSystems (system:
         let
           pkgs = pkgsFor system;
-        in {
-          # `cbind`: the FFI artifact consumed by logos-libp2p-mix-rln's flake.
-          cbind = import ./nix/cbind.nix {
+          cbindPkg = import ./nix/cbind.nix {
             inherit pkgs;
             src = ./.;
             librln = librlnOf system;
+          };
+        in {
+          # `cbind`: the FFI artifact consumed by logos-libp2p-mix-rln's flake.
+          cbind = cbindPkg;
+
+          # `smoketest-3node-ffi`: builds AND runs tests/smoketest_3node_ffi.c
+          # against the cbind output. Passing build = 3-node end-to-end mix
+          # delivery through the C API works.
+          smoketest-3node-ffi = import ./nix/smoketest-3node-ffi.nix {
+            inherit pkgs;
+            src = ./.;
+            cbind = cbindPkg;
           };
 
           # `test-mix-routing`: builds AND runs tests/test_mix_routing.nim as

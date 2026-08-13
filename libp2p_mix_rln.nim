@@ -30,7 +30,12 @@ import libp2p/stream/[connection, lpstream]
 
 # nim-libp2p-mix — Sphinx routing + mix protocol.
 import libp2p_mix
-import libp2p_mix/[mix_protocol, mix_node, curve25519, delay_strategy]
+import libp2p_mix/[mix_protocol, mix_node, curve25519, delay_strategy, pool]
+
+# Receiver-side helpers: mounting a plain LPProtocol on the exit switch so
+# `exit_is_dest` mode can dispatch the payload into a host-visible handler.
+import libp2p/protocols/protocol as lp_protocol
+import stew/byteutils
 
 # mix-rln-spam-protection-plugin — per-hop RLN proof gen/verify.
 import mix_rln_spam_protection
@@ -77,12 +82,37 @@ type NodeInfoResponse {.ffi.} = object
 
 type MixSendRequest {.ffi.} = object
   destPeerId: string     ## Multibase-encoded libp2p peer id of the exit destination.
-  destMultiaddr: string  ## One routable multiaddr of the destination.
+  destMultiaddr: string  ## One routable multiaddr of the destination. Ignored when isExitDest=true.
   proto: string          ## The libp2p protocol id the destination will accept the payload on.
   payload: seq[byte]
   expectReply: bool      ## If true, includes a single-use SURB for a reply.
   numSurbs: int64        ## Non-zero only when expectReply=true; LIP LOGOS-MIXNET expects 1.
   timeoutMs: int64
+  isExitDest: bool
+    ## If true, address the exit as the destination (uses
+    ## `MixDestination.exitNode(peerId)`, which needs a `--d:libp2p_mix_experimental_exit_is_dest`
+    ## build — the flag is on for this library). The exit's mounted
+    ## protocol handler receives the payload directly. Use for
+    ## intra-mixnet messaging where the receiver is also a mix node.
+    ## If false, uses `MixDestination.forwardToAddr(peerId, multiaddr)`
+    ## to dial an external destination.
+
+type MixPeerRecord {.ffi.} = object
+  ## Everything needed to install a peer in another node's `nodePool` so it
+  ## can be picked as a Sphinx hop. Fetch via `libp2pMixRlnGetLocalMixPeerRecord`
+  ## and hand to `libp2pMixRlnAddMixPeer` on other nodes.
+  peerId: string
+  multiaddrs: seq[string]
+  mixPubKey: seq[byte]     ## 32 bytes (Curve25519 pub).
+  libp2pPubKeyHex: string  ## Hex-encoded raw Secp256k1 pub bytes (33 bytes).
+
+type MountReceiverRequest {.ffi.} = object
+  ## Mounts a plain LPProtocol on the local switch under `codec`. Bytes arriving
+  ## on that codec are read length-prefixed (readLp with `maxSize`) and fanned
+  ## out via `onIncomingMixMessage` — so this pairs with the exit-is-dest
+  ## flavor of `sendMixMessage`.
+  codec: string
+  maxSize: int64
 
 type MixSendResponse {.ffi.} = object
   ok: bool
@@ -344,9 +374,8 @@ proc libp2pMixRlnGetNodeInfo*(
       parts.add($a)
     ok(NodeInfoResponse(value: parts.join(",")))
   of NIF_MixPublicKey:
-    # MixNodeInfo.mixPubKey is a FieldElement (32-byte Curve25519). Wire it
-    # as hex once the FieldElement → seq[byte] helper name is confirmed.
-    err("not implemented — MixPublicKey accessor pending")
+    # Curve25519 pub, 32 bytes, hex-encoded.
+    ok(NodeInfoResponse(value: byteutils.toHex(fieldElementToBytes(lib.mixNodeInfo.mixPubKey))))
   of NIF_RlnMembershipIndex:
     err("not implemented — RlnMembershipIndex accessor pending")
 
@@ -388,10 +417,23 @@ proc libp2pMixRlnSendMixMessage*(
 ): Future[Result[MixSendResponse, string]] {.ffi.} =
   ## Sends `req.payload` through a Sphinx circuit to the exit destination,
   ## which will unwrap and hand it to `req.proto` on the destination node.
-  let destAddr = MultiAddress.init(req.destMultiaddr).valueOr:
-    return err("invalid destMultiaddr: " & error)
+  ## When `req.isExitDest` is set, addresses the exit as the destination
+  ## (uses `MixDestination.exitNode`); otherwise routes to an external
+  ## destination via `MixDestination.forwardToAddr`.
   let destPid = PeerId.init(req.destPeerId).valueOr:
     return err("invalid destPeerId: " & $error)
+
+  let dest =
+    if req.isExitDest:
+      when defined(libp2p_mix_experimental_exit_is_dest):
+        MixDestination.exitNode(destPid)
+      else:
+        return err("isExitDest set but library built without " &
+                   "-d:libp2p_mix_experimental_exit_is_dest")
+    else:
+      let addr0 = MultiAddress.init(req.destMultiaddr).valueOr:
+        return err("invalid destMultiaddr: " & error)
+      MixDestination.forwardToAddr(destPid, addr0)
 
   var params = MixParameters()
   if req.expectReply:
@@ -399,9 +441,7 @@ proc libp2pMixRlnSendMixMessage*(
     let n = if req.numSurbs > 0: byte(req.numSurbs) else: byte(1)
     params.numSurbs = Opt.some(n)
 
-  let conn = lib.mixProto.toConnection(
-    MixDestination.init(destPid, destAddr), req.proto, params
-  ).valueOr:
+  let conn = lib.mixProto.toConnection(dest, req.proto, params).valueOr:
     return err("toConnection failed: " & error)
 
   try:
@@ -435,6 +475,119 @@ proc libp2pMixRlnListMixPeers*(
   ## Sourced from Logos Service Discovery + Extensible Peer Records once the
   ## discovery module is mounted. Placeholder returns an empty list.
   ok(MixPeersResponse(peers: @[]))
+
+# ----------------------------------------------------------------------------
+# Multi-node topology helpers
+# ----------------------------------------------------------------------------
+#
+# LIP LOGOS-MIXNET expects Service Discovery to populate each node's peer
+# knowledge. Until we mount SD, the host has to feed peers in manually. These
+# three procs are the seam for that:
+#   - GetLocalMixPeerRecord: this node's public info (peer id, addrs, mix pub
+#     key, libp2p pub key hex) — pass to other nodes' AddMixPeer.
+#   - AddMixPeer: install a peer record into the local `nodePool` so it can
+#     be picked as a Sphinx hop.
+#   - MountReceiver: mount a plain LPProtocol on the local switch under
+#     `codec`; incoming lp-framed bytes fan out via `onIncomingMixMessage`.
+#     Pairs with the exit-is-dest flavor of `sendMixMessage`.
+
+proc libp2pMixRlnGetLocalMixPeerRecord*(
+    lib: LibMixRln
+): Future[Result[MixPeerRecord, string]] {.ffi.} =
+  var addrs: seq[string]
+  for a in lib.switch.peerInfo.addrs:
+    addrs.add($a)
+  # The libp2p pub key in MixNodeInfo is an SkPublicKey (raw secp256k1 pub).
+  # `toRaw` gives 33 compressed bytes.
+  let libp2pPubKeyBytes = lib.mixNodeInfo.libp2pPubKey.getBytes()
+  ok(MixPeerRecord(
+    peerId: $lib.switch.peerInfo.peerId,
+    multiaddrs: addrs,
+    mixPubKey: fieldElementToBytes(lib.mixNodeInfo.mixPubKey),
+    libp2pPubKeyHex: byteutils.toHex(libp2pPubKeyBytes),
+  ))
+
+proc libp2pMixRlnAddMixPeer*(
+    lib: LibMixRln, rec: MixPeerRecord
+): Future[Result[bool, string]] {.ffi.} =
+  let peerId = PeerId.init(rec.peerId).valueOr:
+    return err("invalid peerId: " & $error)
+  if rec.multiaddrs.len == 0:
+    return err("empty multiaddrs")
+  let ma = MultiAddress.init(rec.multiaddrs[0]).valueOr:
+    return err("invalid multiaddr: " & error)
+  let mixPub = bytesToFieldElement(rec.mixPubKey).valueOr:
+    return err("invalid mixPubKey: " & error)
+  var libp2pPubBytes: seq[byte]
+  try:
+    libp2pPubBytes = hexToSeqByte(rec.libp2pPubKeyHex)
+  except ValueError as e:
+    return err("invalid libp2pPubKeyHex: " & e.msg)
+  let libp2pPub = SkPublicKey.init(libp2pPubBytes).valueOr:
+    return err("SkPublicKey.init failed: " & $error)
+  lib.mixProto.nodePool.add(MixPubInfo.init(peerId, ma, mixPub, libp2pPub))
+  ok(true)
+
+type RlnCoordFrame {.ffi.} = object
+  ## A coordination frame delivered to the plugin. `contentTopic` selects
+  ## which handler runs (`handleMembershipUpdate` or `handleProofMetadata`);
+  ## the plugin decodes `data` per topic.
+  contentTopic: string
+  data: seq[byte]
+
+proc libp2pMixRlnDeliverCoordFrame*(
+    lib: LibMixRln, frame: RlnCoordFrame
+): Future[Result[bool, string]] {.ffi.} =
+  ## Routes a coord frame received on the RLN Relay coord channel into the
+  ## local plugin. Pairs with the `onRlnPublishRequested` event: hosts that
+  ## observe an outbound publish request must forward the same frame to every
+  ## other node's `DeliverCoordFrame` for the group to converge.
+  let plugin = lib.rlnPlugin
+  if frame.contentTopic == plugin.getMembershipContentTopic():
+    let r = await plugin.handleMembershipUpdate(frame.data)
+    if r.isErr: return err("handleMembershipUpdate failed: " & r.error)
+  elif frame.contentTopic == plugin.getProofMetadataContentTopic():
+    let r = plugin.handleProofMetadata(frame.data)
+    if r.isErr: return err("handleProofMetadata failed: " & r.error)
+  else:
+    return err("unknown contentTopic: " & frame.contentTopic)
+  ok(true)
+
+proc libp2pMixRlnMountReceiver*(
+    lib: LibMixRln, req: MountReceiverRequest
+): Future[Result[bool, string]] {.ffi.} =
+  ## Mounts a plain LPProtocol on `codec`. On stream open the handler reads
+  ## one length-prefixed frame (up to `maxSize`), fires an `onIncomingMixMessage`
+  ## event with the payload, and closes. Also registers a
+  ## `readLp(maxSize)` DestReadBehavior on the mix protocol so exit-is-dest
+  ## replies frame correctly.
+  let maxSize = if req.maxSize > 0: int(req.maxSize) else: 1 shl 20  # 1MiB
+  let codec = req.codec
+
+  let handler = proc(
+      conn: Connection, proto: string
+  ) {.async: (raises: [CancelledError]).} =
+    try:
+      let bytes = await conn.readLp(maxSize)
+      onIncomingMixMessage(IncomingMixMessageEvent(
+        proto: proto, payload: bytes, surb: @[]
+      ))
+    except LPStreamError as e:
+      warn "MountReceiver: readLp failed", codec = proto, err = e.msg
+    finally:
+      try: await conn.close()
+      except CatchableError: discard
+
+  let p = LPProtocol.new(codecs = @[codec], handler = handler)
+  # When the Switch is already started (typical for post-start mounts triggered
+  # from the host), Switch.mount(...) requires the protocol be started first.
+  try:
+    await p.start()
+  except CatchableError as e:
+    return err("receiver LPProtocol.start failed: " & e.msg)
+  lib.switch.mount(p)
+  lib.mixProto.registerDestReadBehavior(codec, readLp(maxSize))
+  ok(true)
 
 proc libp2pMixRlnGetCoverTrafficRate*(
     lib: LibMixRln
